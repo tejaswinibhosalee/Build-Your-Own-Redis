@@ -6,7 +6,6 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
 /**
  * The actual in-memory keyspace: a single {@code Map<String, Object>} plus
@@ -124,29 +123,15 @@ public final class Database {
         return Set.copyOf(store.keySet());
     }
 
-    /** Matches Redis's KEYS glob syntax: {@code *} and {@code ?} only. */
+    /** Matches Redis's KEYS glob syntax: {@code *} and {@code ?} only (see {@link GlobMatcher}). */
     public Set<String> keysMatching(String globPattern) {
-        Pattern regex = globToRegex(globPattern);
         Set<String> result = new LinkedHashSet<>();
         for (String key : keys()) {
-            if (regex.matcher(key).matches()) {
+            if (GlobMatcher.matches(globPattern, key)) {
                 result.add(key);
             }
         }
         return result;
-    }
-
-    private static Pattern globToRegex(String glob) {
-        StringBuilder regex = new StringBuilder();
-        for (char c : glob.toCharArray()) {
-            switch (c) {
-                case '*' -> regex.append(".*");
-                case '?' -> regex.append('.');
-                case '.', '(', ')', '+', '|', '^', '$', '[', ']', '{', '}', '\\' -> regex.append('\\').append(c);
-                default -> regex.append(c);
-            }
-        }
-        return Pattern.compile(regex.toString());
     }
 
     /** "string" / "list" / "hash" / "set" / "none" (key absent), like the real TYPE command. */

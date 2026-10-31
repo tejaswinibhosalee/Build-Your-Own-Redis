@@ -33,6 +33,22 @@ import java.util.List;
  */
 public final class RespReader {
 
+    /*
+     * Security: hard limits on anything whose size comes from the network.
+     * Without these, a single malicious client could send "*2000000000\r\n"
+     * or "$2000000000\r\n" and make us try to allocate gigabytes of memory
+     * (an OutOfMemoryError takes the whole server down for every client).
+     * Real Redis has the same kind of guards (proto-max-bulk-len, etc.).
+     */
+    /** Maximum number of arguments in one command. */
+    public static final int MAX_ARGS = 1024 * 1024;
+    /** Maximum size of a single bulk string (64 MiB). */
+    public static final int MAX_BULK_BYTES = 64 * 1024 * 1024;
+    /** Maximum length of an inline (telnet-style) command line. */
+    public static final int MAX_INLINE_BYTES = 64 * 1024;
+    /** A length/count header never needs more digits than this. */
+    private static final int MAX_HEADER_DIGITS = 20;
+
     private final InputStream in;
 
     public RespReader(InputStream in) {
@@ -56,18 +72,26 @@ public final class RespReader {
     }
 
     private List<String> readArrayCommand() throws IOException {
-        int count = (int) readLong();
-        if (count <= 0) {
+        long declared = readLong();
+        if (declared <= 0) {
             return List.of();
         }
-        List<String> args = new ArrayList<>(count);
+        if (declared > MAX_ARGS) {
+            throw new ProtocolException("too many arguments (max " + MAX_ARGS + ")");
+        }
+        int count = (int) declared;
+        // Grow the list as real data arrives instead of trusting `count` up front.
+        List<String> args = new ArrayList<>(Math.min(count, 64));
         for (int i = 0; i < count; i++) {
             int type = in.read();
             if (type != '$') {
                 throw new ProtocolException("expected '$' bulk-string prefix, got '" + (char) type + "'");
             }
-            int length = (int) readLong();
-            byte[] payload = readExactly(length);
+            long length = readLong();
+            if (length < 0 || length > MAX_BULK_BYTES) {
+                throw new ProtocolException("invalid bulk length (max " + MAX_BULK_BYTES + " bytes)");
+            }
+            byte[] payload = readExactly((int) length);
             expectCrlf();
             args.add(new String(payload, StandardCharsets.UTF_8));
         }
@@ -83,6 +107,9 @@ public final class RespReader {
             if (b != '\r') {
                 line.append((char) b);
             }
+            if (line.length() > MAX_INLINE_BYTES) {
+                throw new ProtocolException("inline command too long");
+            }
         }
         String trimmed = line.toString().trim();
         if (trimmed.isEmpty()) {
@@ -97,6 +124,9 @@ public final class RespReader {
         int b;
         while ((b = in.read()) != -1 && b != '\r') {
             digits.append((char) b);
+            if (digits.length() > MAX_HEADER_DIGITS) {
+                throw new ProtocolException("length/count header too long");
+            }
         }
         expectLf();
         try {
