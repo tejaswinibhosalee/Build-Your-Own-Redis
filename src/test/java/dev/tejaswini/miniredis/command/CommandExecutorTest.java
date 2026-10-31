@@ -27,6 +27,21 @@ class CommandExecutorTest {
     }
 
     @Test
+    void incrAndAppendKeepTheKeysTtlButSetClearsIt() {
+        // Rate-limiting pattern: the counter must still expire after its window.
+        run("SET", "rate:user42", "0", "EX", "60");
+        run("INCR", "rate:user42");
+        run("INCR", "rate:user42");
+        assertTrue(((Reply.Integer) run("TTL", "rate:user42")).value() > 0, "INCR must keep the TTL");
+
+        run("APPEND", "rate:user42", "0");
+        assertTrue(((Reply.Integer) run("TTL", "rate:user42")).value() > 0, "APPEND must keep the TTL");
+
+        run("SET", "rate:user42", "fresh");
+        assertEquals(new Reply.Integer(-1), run("TTL", "rate:user42"), "a plain SET clears the TTL");
+    }
+
+    @Test
     void pingRepliesWithPong() {
         assertEquals(new Reply.SimpleString("PONG"), run("PING"));
     }

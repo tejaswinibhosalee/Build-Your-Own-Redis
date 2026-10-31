@@ -37,7 +37,7 @@ public final class AofLoader {
                 if (args.isEmpty()) {
                     continue;
                 }
-                // logToAof=false: these commands are already in the file we're
+                // AOF_REPLAY origin: these commands are already in the file we're
                 // reading - re-appending them here would duplicate every entry
                 // on every restart.
                 executor.execute(args, CommandOrigin.AOF_REPLAY);

@@ -155,6 +155,15 @@ public final class Database {
         store.put(key, value);
     }
 
+    /**
+     * Changes a string's value but keeps its TTL - what INCR, DECR and APPEND
+     * do in real Redis. (A rate-limit counter created with a 60s expiry must
+     * still expire after 60s, no matter how many times it is incremented.)
+     */
+    public void updateString(String key, String value) {
+        store.put(key, value);
+    }
+
     /** Returns the string at {@code key}, or null if absent. Throws if it's a different type. */
     public String getString(String key) {
         expireIfNeeded(key);

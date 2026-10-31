@@ -99,7 +99,7 @@ public final class StringCommands {
         } catch (NumberFormatException e) {
             throw new CommandException("ERR value is not an integer or out of range");
         }
-        db.setString(key, Long.toString(value));
+        db.updateString(key, Long.toString(value)); // keeps any TTL, like real Redis
         return new Reply.Integer(value);
     }
 
@@ -112,7 +112,7 @@ public final class StringCommands {
         String suffix = args.get(2);
         String current = db.getString(key);
         String updated = (current == null ? "" : current) + suffix;
-        db.setString(key, updated);
+        db.updateString(key, updated); // keeps any TTL, like real Redis
         return new Reply.Integer(updated.length());
     }
 
