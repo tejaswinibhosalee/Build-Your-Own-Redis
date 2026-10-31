@@ -1,0 +1,26 @@
+# Start everything with:   cp .env.example .env   (then edit the password)
+#                          docker compose up --build
+services:
+  mini-redis:
+    build: .
+    image: mini-redis:latest
+    environment:
+      # Read from the .env file next to this one - never hard-code secrets here.
+      MINI_REDIS_PASSWORD: ${MINI_REDIS_PASSWORD:?Set MINI_REDIS_PASSWORD in .env (see .env.example)}
+    ports:
+      # Published on 127.0.0.1 only: reachable from this computer, not from your network.
+      - "127.0.0.1:6379:6379"   # Redis protocol (redis-cli, client libraries)
+      - "127.0.0.1:8080:8080"   # Web dashboard
+    volumes:
+      - mini-redis-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+volumes:
+  mini-redis-data:

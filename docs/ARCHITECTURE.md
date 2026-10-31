@@ -83,6 +83,51 @@ single-threaded with non-blocking I/O like Redis itself).
   This is the same idea as Redis's `BGREWRITEAOF`, just triggered
   manually instead of automatically in the background.
 
+## Web dashboard
+
+```
+ Browser (React SPA)                         Java process
+ ┌────────────────────────┐   HTTP/JSON    ┌───────────────────────────────────────┐
+ │ StatCards  Console     │ ─────────────▶ │ DashboardServer  (JDK HttpServer,     │
+ │ Chart      KeyBrowser  │   polls 1-2s   │   one entry point = every security    │
+ │ Inspector  Activity    │ ◀───────────── │   check runs on every request)        │
+ └────────────────────────┘                │        │                               │
+                                           │        ▼                               │
+                                           │ DashboardApi ──▶ CommandExecutor ──▶ Database
+                                           │        ▲              │ (listener)     │
+                                           │        └── ServerStats ◀┘               │
+                                           └───────────────────────────────────────┘
+```
+
+- **Frontend** (`frontend/`): React components built by Vite into static files. Maven's
+  `frontend-maven-plugin` runs the build during `mvn package`, and the output is packed into the jar under
+  `/dashboard`, so the whole app ships as one file.
+- **API** (`dashboard/DashboardApi`): `/api/stats`, `/api/keys`, `/api/key`, `/api/activity`,
+  `/api/command`, `/api/demo-data`, plus `/api/session`, `/api/login` and `/api/logout`. Keyspace reads take the
+  same lock as commands (`CommandExecutor.callExclusive`), so the UI always sees a consistent snapshot, and every
+  response is size-capped.
+- **Console commands** run through the normal `CommandExecutor` with origin `DASHBOARD`, so they are logged to
+  the AOF and appear in the activity feed exactly like `redis-cli` traffic.
+- **Metrics**: `ServerStats` subscribes to the executor as a `CommandListener` (observer pattern) and keeps
+  a 60-second ring buffer of per-second counts plus a bounded feed of recent commands.
+
+## Security model
+
+Security is layered, so no single mistake exposes the data:
+
+1. **Network**: both servers bind to `127.0.0.1` by default. With no password, *protected mode* refuses
+   non-loopback TCP clients, and the dashboard refuses to start on a non-loopback address.
+2. **Authentication**: `AUTH` is handled in `ClientHandler` (per-connection state), compared in constant time
+   and throttled on failure, and is never passed to the executor, so it can't leak into the AOF or the activity
+   feed. The dashboard exchanges the password once for a random 256-bit bearer token.
+3. **Input limits**: the RESP reader caps argument counts and sizes, and `KEYS` uses a linear-time glob
+   matcher (no regex backtracking).
+4. **Browser protections**: CSP without inline scripts, React output escaping, CSRF header + `Origin` check,
+   `Host` allow-list (DNS rebinding), frame denial, `no-store` caching for API data, and a strict allow-list
+   pattern for static file paths (no traversal).
+
+See [SECURITY.md](../SECURITY.md) for the full table.
+
 ## What's deliberately not implemented
 
 See the "What this project leaves out" section of the main README for the

@@ -1,6 +1,7 @@
 package dev.tejaswini.miniredis.persistence;
 
 import dev.tejaswini.miniredis.command.CommandExecutor;
+import dev.tejaswini.miniredis.command.CommandOrigin;
 import dev.tejaswini.miniredis.protocol.RespReader;
 
 import java.io.BufferedInputStream;
@@ -39,7 +40,7 @@ public final class AofLoader {
                 // logToAof=false: these commands are already in the file we're
                 // reading - re-appending them here would duplicate every entry
                 // on every restart.
-                executor.execute(args, false);
+                executor.execute(args, CommandOrigin.AOF_REPLAY);
             }
         } catch (IOException e) {
             throw new UncheckedIOException("failed to load AOF file: " + path, e);
