@@ -1,73 +1,110 @@
 # mini-redis
 
-A from-scratch, educational re-implementation of core Redis in Java: the
-**RESP wire protocol**, a **TCP server**, in-memory **data structures**
-(strings, lists, hashes, sets), **key expiry**, and a simple **AOF-style
-persistence** layer. It speaks real RESP, so it works with the actual
-`redis-cli` and any real Redis client library - it is not a mock.
+[![CI](https://github.com/tejaswinibhosalee/Build-Your-Own-Redis/actions/workflows/ci.yml/badge.svg)](https://github.com/tejaswinibhosalee/Build-Your-Own-Redis/actions/workflows/ci.yml)
+![Java 21](https://img.shields.io/badge/Java-21-orange)
+![React 19](https://img.shields.io/badge/React-19-61dafb)
+![Runtime dependencies](https://img.shields.io/badge/Java%20runtime%20deps-0-brightgreen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Built as a learning project to understand what an in-memory data store
-actually does "under the hood" - the same category of systems (caches,
-fast key-value stores) that sit next to Spring Boot microservices in a
-typical backend/banking stack. It intentionally implements a **focused
-core** rather than the full Redis command set, so the code stays small
-enough to read start to finish in one sitting.
+**A Redis-compatible in-memory database written from scratch in Java 21, with a live React dashboard.**
+
+mini-redis implements the real **RESP wire protocol**, so the official `redis-cli` and any Redis client library
+(Jedis, Lettuce, redis-py, ...) can talk to it. It supports strings, lists, hashes and sets, key expiry (TTL),
+append-only-file persistence, and password authentication, and ships with a web dashboard showing what the
+server is doing in real time.
+
+![mini-redis dashboard](docs/images/dashboard.png)
+
+## Highlights
+
+- **Wire-compatible with Redis**: a hand-written RESP parser and encoder; works with the real `redis-cli`.
+- **Concurrent TCP server on Java 21 virtual threads**: one cheap thread per connection, with commands
+  serialized behind a single lock so operations like `INCR` stay atomic, like Redis's single-threaded model.
+- **TTL expiry, both lazy and active**: keys are checked on access *and* swept in the background.
+- **Durability**: an append-only file (AOF) replayed on startup, with compaction via `SAVE`.
+- **Live dashboard (React + Vite)**: throughput chart, keyspace breakdown, key browser and inspector,
+  a live activity feed, and a console that shows the **raw RESP bytes** for every command.
+- **Secure by default**: loopback-only binding, protected mode, optional password auth, DoS limits, and a
+  dashboard hardened against XSS, CSRF, DNS rebinding and clickjacking (see [SECURITY.md](SECURITY.md)).
+- **Well tested**: 70+ unit and integration tests, including attack scenarios, run on every push by CI.
 
 ## Quick start
 
-Requires Java 21+ and Maven.
+You need **Java 21+** and **Maven**. Node.js is *not* required: Maven downloads a private copy to build the
+dashboard.
 
 ```bash
 mvn package
 java -jar target/mini-redis.jar
 ```
 
-By default it listens on port `6379` (Redis's own default) and persists
-to `mini-redis.aof` in the working directory.
+Then:
 
-```bash
-java -jar target/mini-redis.jar --port 6380 --aof-file /tmp/my.aof
-java -jar target/mini-redis.jar --no-aof   # disable persistence entirely
-```
-
-Connect with the real Redis CLI:
+- open the dashboard at **http://localhost:8080**
+- click **Load demo data**, or connect with the real Redis CLI:
 
 ```bash
 redis-cli -p 6379
-127.0.0.1:6379> SET foo bar
+127.0.0.1:6379> SET greeting "hello"
 OK
-127.0.0.1:6379> GET foo
-"bar"
-127.0.0.1:6379> RPUSH mylist a b c
+127.0.0.1:6379> GET greeting
+"hello"
+127.0.0.1:6379> RPUSH tasks design build ship
 (integer) 3
-127.0.0.1:6379> LRANGE mylist 0 -1
-1) "a"
-2) "b"
-3) "c"
+127.0.0.1:6379> LRANGE tasks 0 -1
+1) "design"
+2) "build"
+3) "ship"
 ```
 
-(Or skip redis-cli entirely: `telnet localhost 6379` / `nc localhost 6379`
-and type `PING` - the server understands plain inline commands too, not
-just the length-prefixed RESP arrays real clients send.)
+No `redis-cli`? `nc localhost 6379` works too: type `PING` and press Enter. The server also understands plain
+inline commands.
 
-Run the tests:
+### With a password
+
+Set the password through an **environment variable** or a **file**, never as a command-line flag (command
+lines are visible to every user on the machine via `ps`):
 
 ```bash
-mvn test
+export MINI_REDIS_PASSWORD="$(openssl rand -base64 24)"
+java -jar target/mini-redis.jar
+redis-cli -p 6379 -a "$MINI_REDIS_PASSWORD" PING
 ```
 
-Run with Docker:
+The dashboard will then show a login screen.
+
+### With Docker
 
 ```bash
-docker build -t mini-redis .
-docker run -p 6379:6379 -v mini-redis-data:/data mini-redis
+cp .env.example .env      # then put your own password in .env
+docker compose up --build
 ```
+
+The compose file publishes both ports on `127.0.0.1` only, runs the container as a non-root user with all
+Linux capabilities dropped, and stores data in a named volume.
+
+## Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--port <n>` | `6379` | TCP port for Redis clients |
+| `--bind <address>` | `127.0.0.1` | Address to listen on (`0.0.0.0` = all interfaces) |
+| `--max-clients <n>` | `10000` | Maximum simultaneous client connections |
+| `--aof-file <path>` | `mini-redis.aof` | Append-only persistence file |
+| `--no-aof` | | Keep data in memory only |
+| `--dashboard-port <n>` | `8080` | Web dashboard port |
+| `--dashboard-bind <address>` | `127.0.0.1` | Dashboard listen address |
+| `--no-dashboard` | | Don't start the dashboard |
+| `--password-file <path>` | | Read the password from a file |
+| `MINI_REDIS_PASSWORD` (env var) | | Password for clients and the dashboard |
+
+Run `java -jar target/mini-redis.jar --help` for the full list.
 
 ## Supported commands
 
 | Category   | Commands |
 |------------|----------|
-| Connection | `PING`, `ECHO`, `QUIT` |
+| Connection | `PING`, `ECHO`, `AUTH`, `QUIT` |
 | Generic    | `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `PERSIST`, `KEYS`, `TYPE`, `FLUSHALL` |
 | Strings    | `SET` (`EX`/`PX`/`NX`/`XX`), `GET`, `INCR`, `DECR`, `APPEND`, `STRLEN` |
 | Lists      | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE` |
@@ -75,84 +112,58 @@ docker run -p 6379:6379 -v mini-redis-data:/data mini-redis
 | Sets       | `SADD`, `SMEMBERS`, `SREM`, `SISMEMBER` |
 | Server     | `DBSIZE`, `SAVE`, `INFO`, `COMMAND`/`CONFIG` (stubs, for client compatibility) |
 
-## Concepts this project covers
+## How it works
 
-- **RESP (REdis Serialization Protocol)** - hand-writing a binary-safe,
-  length-prefixed wire protocol parser and encoder (`protocol/`).
-- **A keyspace holding multiple types in one map** - `String`,
-  `Deque<String>`, `Map<String,String>`, `Set<String>` all under one
-  `Map<String, Object>`, with `WRONGTYPE` errors exactly like real Redis
-  (`core/Database.java`).
-- **Lazy + active key expiry** - checked on every read/write, and swept
-  proactively by a background thread (`core/Database.activeExpireCycle`,
-  `command/ExpiryScheduler.java`).
-- **A concurrency model built around one global lock**, deliberately
-  modeling why real Redis's single-threaded execution makes commands
-  like `INCR` atomic without per-key locking (`command/CommandExecutor.java`
-  - see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full
-  explanation and its tradeoffs).
-- **Java 21 virtual threads** for connection handling - simple
-  one-thread-per-connection blocking I/O code that still scales to many
-  concurrent, mostly-idle clients (`server/MiniRedisServer.java`).
-- **Durability via an append-only log (AOF)**, including **log
-  compaction/rewrite** (`SAVE` reduces the file to the minimal commands
-  needed to reconstruct the current dataset, like Redis's
-  `BGREWRITEAOF`) (`persistence/`).
-- **The command/strategy pattern** - each command is a small, independently
-  testable handler registered by name in a dispatch table, rather than one
-  giant `switch`.
+```
+ redis-cli / client libs ──TCP──▶ MiniRedisServer ──▶ ClientHandler (1 virtual thread per connection)
+                                                          │  RespReader: bytes → ["SET","k","v"]
+                                                          ▼
+ Browser (React) ──HTTP/JSON──▶ DashboardServer ──▶ CommandExecutor ── one global lock ──▶ Database
+                                     │                    │                                (String/List/Hash/Set + TTLs)
+                                     │                    ├──▶ AofWriter (append every write to disk)
+                                     └── reads ◀── ServerStats (observer: ops/sec, activity feed)
+```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a diagram and a
-deeper walkthrough of the request lifecycle.
+Every command, whether from `redis-cli` or the dashboard console, goes through the same `CommandExecutor`,
+so the dashboard shows exactly what real clients experience. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for the request lifecycle, the concurrency model and the persistence design.
 
 ## Project layout
 
 ```
-src/main/java/dev/tejaswini/miniredis/
-├── MiniRedisApplication.java   entry point: arg parsing + wiring
-├── protocol/                   RESP parsing (RespReader) & encoding (RespWriter)
-├── core/                       Database (the keyspace) + expiry logic
-├── command/                    CommandExecutor (dispatch + locking) and…
-│   └── impl/                   …command groups: String/List/Hash/Set/Generic/Server
-├── persistence/                AofWriter (append + rewrite), AofLoader (replay)
-└── server/                     MiniRedisServer (accept loop), ClientHandler (per-connection)
+├── src/main/java/dev/tejaswini/miniredis/
+│   ├── MiniRedisApplication.java   entry point: options + wiring
+│   ├── protocol/                   RESP parsing (RespReader) and encoding (RespWriter)
+│   ├── core/                       Database (the keyspace), expiry, glob matching
+│   ├── command/                    CommandExecutor (dispatch + locking) and command groups in impl/
+│   ├── persistence/                AofWriter (append + rewrite), AofLoader (replay)
+│   ├── server/                     TCP accept loop, per-connection handler, AUTH, protected mode
+│   ├── security/                   password checking and login throttling
+│   ├── stats/                      live metrics (ops/sec, per-command counts, activity feed)
+│   └── dashboard/                  HTTP server + JSON API for the web UI
+├── src/test/java/...               unit + integration tests
+├── frontend/                       React + Vite dashboard (built into the jar by Maven)
+│   └── src/components/             Console, KeyBrowser, Inspector, ThroughputChart, ...
+├── Dockerfile, docker-compose.yml
+└── docs/ARCHITECTURE.md
 ```
 
-## What this project leaves out (on purpose)
+## Development
 
-To keep this readable as a learning project, it does **not** implement:
-pub/sub, transactions (`MULTI`/`EXEC`), Lua scripting, sorted sets,
-replication, cluster mode, ACLs/auth, RESP3, or a binary RDB snapshot
-format (it uses AOF-only persistence instead - simpler to implement
-correctly and just as good a teaching example of the *durability*
-concept). Those are natural "what I'd add next" extensions if you want to
-go further with this codebase.
+```bash
+mvn test                           # run all tests
+java -jar target/mini-redis.jar    # backend + built dashboard on :8080
 
-## Similar projects worth building next
+# Hot-reloading UI while you edit React code (needs Node 20+):
+cd frontend && npm ci && npm run dev    # http://localhost:5173, API proxied to :8080
+```
 
-Given a banking/Spring Boot microservices background, these follow
-naturally from the concepts above and make strong companion resume
-projects:
+## Deliberately out of scope
 
-1. **Build-your-own message queue** (Kafka-lite) - partitions, offsets,
-   consumer groups, at-least-once delivery.
-2. **Ledger microservice** - Spring Boot + Postgres double-entry
-   bookkeeping service with idempotency keys and outbox-pattern event
-   publishing; very directly banking-relevant.
-3. **Rate limiter / API gateway** - Spring Boot filter implementing
-   token-bucket/sliding-window limiting, backed by this Redis clone (or
-   real Redis) for shared counters across instances.
-4. **Build-your-own circuit breaker** (like Resilience4j) - state machine
-   (closed/open/half-open), used as a Spring Boot starter.
-5. **Distributed lock service** - a tiny Raft or single-leader
-   lease-based lock manager (etcd/ZooKeeper-lite), then use it to
-   coordinate a multi-instance Spring Boot job scheduler.
-6. **Event-driven fraud-detection pipeline** - Kafka + Spring Boot
-   consumers doing rule-based scoring on a transaction stream.
-7. **Build-your-own job scheduler** (like Quartz) - cron parsing, missed-run
-   recovery, distributed leader election so only one instance fires a job.
+To keep the codebase small enough to read in one sitting, mini-redis does **not** implement pub/sub,
+transactions (`MULTI`/`EXEC`), Lua scripting, sorted sets, streams, replication, clustering, ACL users, RESP3
+or RDB snapshots. It also has no TLS. These are natural next steps.
 
-Each of these pairs well with this project: they're systems-level,
-Java-first, and map directly onto the kind of infrastructure that sits
-around banking microservices (caching, messaging, resilience,
-coordination, scheduling).
+## License
+
+[MIT](LICENSE)

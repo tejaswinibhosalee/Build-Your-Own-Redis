@@ -307,3 +307,11 @@ li.flash { animation: flash 1.2s ease-out; }
   .stat-value { font-size: 22px; }
   .brand-sub { display: none; }
 }
+
+/* ---------- Additions for the React version ---------- */
+.legend i.seg-string { background: var(--t-string); }
+.legend i.seg-list { background: var(--t-list); }
+.legend i.seg-hash { background: var(--t-hash); }
+.legend i.seg-set { background: var(--t-set); }
+.key-list li button:disabled { cursor: not-allowed; opacity: .6; }
+.btn:disabled { opacity: .6; cursor: progress; }

@@ -18,8 +18,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 /**
  * The web dashboard: a small HTTP server (the JDK's built-in
@@ -66,16 +69,24 @@ public final class DashboardServer {
             "form-action 'none'",
             "frame-ancestors 'none'");
 
-    /** Static files served from the classpath. An allowlist: nothing else on disk is reachable. */
-    private static final Map<String, StaticFile> STATIC_FILES = Map.of(
-            "/", new StaticFile("index.html", "text/html; charset=utf-8"),
-            "/index.html", new StaticFile("index.html", "text/html; charset=utf-8"),
-            "/assets/app.js", new StaticFile("app.js", "text/javascript; charset=utf-8"),
-            "/assets/styles.css", new StaticFile("styles.css", "text/css; charset=utf-8"),
-            "/assets/favicon.svg", new StaticFile("favicon.svg", "image/svg+xml"));
-
-    private record StaticFile(String resource, String contentType) {
-    }
+    /**
+     * Static UI files (the built React app) are served from the classpath
+     * folder {@value #STATIC_ROOT}. Requested paths must match this strict
+     * pattern - no slashes after "assets/", no "..", no leading dot - so
+     * path traversal ("/assets/../../etc/passwd") is impossible by
+     * construction rather than by trying to sanitize the input.
+     */
+    private static final Pattern STATIC_PATH =
+            Pattern.compile("^/(assets/)?[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$");
+    private static final String STATIC_ROOT = "/dashboard";
+    private static final Map<String, String> CONTENT_TYPES = Map.of(
+            "html", "text/html; charset=utf-8",
+            "js", "text/javascript; charset=utf-8",
+            "css", "text/css; charset=utf-8",
+            "svg", "image/svg+xml",
+            "png", "image/png",
+            "ico", "image/x-icon",
+            "woff2", "font/woff2");
 
     /** Thrown inside handlers to short-circuit with an HTTP error status. */
     static final class HttpError extends RuntimeException {
@@ -93,7 +104,7 @@ public final class DashboardServer {
     private final SessionManager sessions = new SessionManager();
     private final LoginThrottle loginThrottle = new LoginThrottle();
     private final DashboardApi api;
-    private final Map<String, byte[]> staticContent = new HashMap<>();
+    private final Map<String, Optional<byte[]>> staticCache = new ConcurrentHashMap<>();
     private HttpServer http;
 
     public DashboardServer(String bindAddress, int port, CommandExecutor executor, ServerStats stats,
@@ -110,17 +121,16 @@ public final class DashboardServer {
                     + " without a password. Set " + PasswordAuthenticator.PASSWORD_ENV_VAR
                     + " or bind the dashboard to 127.0.0.1.");
         }
-        for (StaticFile file : STATIC_FILES.values()) {
-            staticContent.computeIfAbsent(file.resource(), DashboardServer::loadResource);
+        if (DashboardServer.class.getResource(STATIC_ROOT + "/index.html") == null) {
+            throw new IllegalStateException("Dashboard UI files are missing from the build. "
+                    + "Build with `mvn package` (which also builds the React frontend), or start with --no-dashboard.");
         }
     }
 
-    private static byte[] loadResource(String name) {
-        try (InputStream in = DashboardServer.class.getResourceAsStream("/dashboard/" + name)) {
-            if (in == null) {
-                throw new IllegalStateException("missing dashboard resource: " + name);
-            }
-            return in.readAllBytes();
+    /** Reads a UI file from the classpath, or empty if it doesn't exist. */
+    private static Optional<byte[]> loadResource(String path) {
+        try (InputStream in = DashboardServer.class.getResourceAsStream(STATIC_ROOT + path)) {
+            return in == null ? Optional.empty() : Optional.of(in.readAllBytes());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -311,12 +321,25 @@ public final class DashboardServer {
         if (!method.equals("GET") && !method.equals("HEAD")) {
             throw new HttpError(405, "Method not allowed");
         }
-        StaticFile file = STATIC_FILES.get(path);
-        if (file == null) {
+        if (path.equals("/")) {
+            path = "/index.html";
+        }
+        if (!STATIC_PATH.matcher(path).matches()) {
             throw new HttpError(404, "Not found");
         }
-        byte[] content = staticContent.get(file.resource());
-        ex.getResponseHeaders().set("Content-Type", file.contentType());
+        String extension = path.substring(path.lastIndexOf('.') + 1);
+        String contentType = CONTENT_TYPES.get(extension);
+        if (contentType == null) {
+            throw new HttpError(404, "Not found");
+        }
+        byte[] content = staticCache.computeIfAbsent(path, DashboardServer::loadResource)
+                .orElseThrow(() -> new HttpError(404, "Not found"));
+
+        ex.getResponseHeaders().set("Content-Type", contentType);
+        if (path.startsWith("/assets/")) {
+            // File names contain a content hash, so they can be cached forever.
+            ex.getResponseHeaders().set("Cache-Control", "public, max-age=31536000, immutable");
+        }
         if (method.equals("HEAD")) {
             ex.sendResponseHeaders(200, -1);
             return;

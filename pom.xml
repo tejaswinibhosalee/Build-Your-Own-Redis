@@ -6,7 +6,7 @@
 
   <groupId>dev.tejaswini</groupId>
   <artifactId>mini-redis</artifactId>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <packaging>jar</packaging>
 
   <name>mini-redis</name>
@@ -23,6 +23,10 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.10.2</junit.version>
     <mainClass>dev.tejaswini.miniredis.MiniRedisApplication</mainClass>
+    <!-- Node.js used only at build time to compile the React dashboard.
+         Maven downloads it into frontend/node/, so you don't need Node installed. -->
+    <node.version>v22.12.0</node.version>
+    <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
   </properties>
 
   <dependencies>
@@ -36,7 +40,58 @@
 
   <build>
     <finalName>mini-redis</finalName>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <!-- The compiled React app ends up inside the jar under /dashboard -->
+      <resource>
+        <directory>frontend/dist</directory>
+        <targetPath>dashboard</targetPath>
+      </resource>
+    </resources>
     <plugins>
+      <plugin>
+        <!-- Builds the React dashboard (frontend/) as part of `mvn package`.
+             Skip it with -Dskip.npm -Dskip.installnodenpm if dist/ is already built. -->
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <version>${frontend-maven-plugin.version}</version>
+        <configuration>
+          <workingDirectory>frontend</workingDirectory>
+          <installDirectory>frontend</installDirectory>
+        </configuration>
+        <executions>
+          <execution>
+            <id>install-node-and-npm</id>
+            <goals>
+              <goal>install-node-and-npm</goal>
+            </goals>
+            <configuration>
+              <nodeVersion>${node.version}</nodeVersion>
+            </configuration>
+          </execution>
+          <execution>
+            <!-- `npm ci` installs exactly what package-lock.json pins - reproducible and tamper-evident -->
+            <id>npm-ci</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <configuration>
+              <arguments>ci --no-audit --no-fund</arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>npm-build</id>
+            <goals>
+              <goal>npm</goal>
+            </goals>
+            <configuration>
+              <arguments>run build</arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>

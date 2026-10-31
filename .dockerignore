@@ -1,0 +1,11 @@
+target/
+frontend/node_modules/
+frontend/node/
+frontend/dist/
+.git/
+.github/
+.env
+.env.*
+*.aof
+*.log
+docs/

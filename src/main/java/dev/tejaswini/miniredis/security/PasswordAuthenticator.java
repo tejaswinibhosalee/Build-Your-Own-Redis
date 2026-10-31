@@ -47,9 +47,20 @@ public final class PasswordAuthenticator {
         return new PasswordAuthenticator(null);
     }
 
+    /** The placeholder from .env.example - starting with it would mean "secured" by a public password. */
+    static final String EXAMPLE_PLACEHOLDER = "change-me-to-a-long-random-password";
+
     public static PasswordAuthenticator withPassword(String password) {
         if (password == null || password.isEmpty()) {
             throw new IllegalArgumentException("password must not be empty");
+        }
+        if (password.equals(EXAMPLE_PLACEHOLDER)) {
+            throw new IllegalArgumentException("the password is still the placeholder from .env.example - "
+                    + "set your own (e.g. `openssl rand -base64 24`)");
+        }
+        if (password.length() < RECOMMENDED_MIN_LENGTH) {
+            System.out.println("WARNING: the password is shorter than " + RECOMMENDED_MIN_LENGTH
+                    + " characters; use a longer random one.");
         }
         return new PasswordAuthenticator(sha256(password));
     }
