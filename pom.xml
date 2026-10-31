@@ -26,7 +26,7 @@
     <!-- Node.js used only at build time to compile the React dashboard.
          Maven downloads it into frontend/node/, so you don't need Node installed. -->
     <node.version>v22.12.0</node.version>
-    <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+    <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
   </properties>
 
   <dependencies>
